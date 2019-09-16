@@ -1,1 +1,6 @@
+11-09-2019
 
+Things which were discussed in today's meet
+1)Started the conversation with tasks that has been uploaded on GitHub that we are aiming to do before the October review
+2)Planned to complete the first task i.e. learning Raspberry pi n going through its datasheet n also referring videos from the link which has been provided in our Project grp
+3)Discussed about selecting the right microphones and the general flow of the project. First we will make the bot move towards sound and then we will train it to recognize human voice.
