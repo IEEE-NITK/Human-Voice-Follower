@@ -1,0 +1,500 @@
+#include <inttypes.h>
+#include <avr/io.h>
+#include <avr/interrupt.h>
+#include <stdio.h>
+#include <util/delay.h>
+#include <string.h>
+#include "uart.h"
+#include <math.h>
+ 
+#define F_CPU 16000000UL
+
+FILE uart_str = FDEV_SETUP_STREAM(uart_putchar, uart_getchar, _FDEV_SETUP_RW);
+
+#define UART_BAUD  9600
+
+#define begin {
+#define end }
+//change from 22 to 23 because 9 inches
+#define DISTANCE 23
+
+#define FWD 1
+#define R_45 2
+#define R_90 3
+#define R_90_45 4
+#define BCK 5
+#define L_45 6
+#define L_90 7
+#define L_90_45 8
+void init (void);
+void motor_movement ( int reqPulse, char rightSpeed, char leftspeed );
+volatile char sensor_flag,sensor_ready;
+volatile char right_dir, left_dir, rotate_90; 
+volatile unsigned long int timer0_var,timer2right_100us,timer2left_100us,timer_Led;
+volatile unsigned long int delta_time,count,deltatime_us;
+char high_pulse_right,high_pulse_left;
+unsigned int times_r,times_l;
+double Angle, Angle_deg;
+char Motor_state;
+
+// Port A is for motor
+//Timer interrupt 0
+
+ISR (INT0_vect)
+begin
+   // If first Interrupt fro right sensor
+   if (sensor_flag == 0)
+     begin
+        TCNT0 = 0; // start new count cycle
+        timer0_var = 0;
+        right_dir = 1;
+		// Reached destination, so stop
+        if ((EIFR & 0x06)==0x06) //if INTF1 and INTF2 are 1 
+	   begin
+	      sensor_ready = 1;
+	      EIFR  = (1 <<INTF1)|(1<<INTF2);  //clear external interrupt flag
+	      left_dir = 1; //S0 equidistant from both S1 and S2
+              rotate_90 = 1;
+			  delta_time = TCNT0 + (timer0_var * 256);
+           end
+
+         else if ((EIFR & 0x06)==0x04)
+	    begin
+	      //sensor_ready = 1;
+	      EIFR  = (1 <<INTF2);  //clear external interrupt flag
+	      left_dir = 0; //S0 and S2 equidistant 
+              rotate_90 = 1;
+            end 
+
+	 else if ((EIFR & 0x06)==0x02)
+	    begin
+	      sensor_ready = 1;
+	      EIFR  = (1 <<INTF1);  //clear external interrupt flag
+	      left_dir = 1; //S0 and S1 equidistant 
+              rotate_90 = 0;
+			  delta_time = TCNT0 + (timer0_var * 256);
+            end 
+
+     sensor_flag = 1;
+     end
+  
+   else //if ((sensor_ready == 0) && (sensor_flag == 1))
+      begin
+           delta_time = TCNT0 + (timer0_var * 256);
+	   count = delta_time;
+	   timer0_var = 0;
+	   sensor_ready = 1;
+
+      end 
+	   
+end
+
+
+//Timer interrupt 1
+
+ISR (INT1_vect)
+begin
+  if (sensor_flag == 0)
+    begin
+        TCNT0 = 0;
+	timer0_var = 0;
+	left_dir = 1;
+	if ((EIFR & 0x05)==0x05) //if INTF1 and INTF2 are 1 
+	    begin
+	      sensor_ready = 1;
+	      EIFR  = (1 <<INTF0)|(1<<INTF2);  //clear external interrupt flag
+	      right_dir = 1; //S0 equidistant from both S1 and S2
+              rotate_90 = 1;
+			  delta_time = 0;
+            end
+
+        else if ((EIFR & 0x05)==0x04)
+	     begin
+	      //sensor_ready = 1;
+	      EIFR  = (1 <<INTF2);  //clear external interrupt flag
+	      right_dir = 0; //S1 and S2 equidistant 
+              rotate_90 = 1;
+            end 
+
+	else if ((EIFR & 0x05)==0x01)
+	     begin
+	      sensor_ready = 1;
+	      EIFR  = (1 <<INTF1);  //clear external interrupt flag
+	      right_dir = 1; //S0 and S1 equidistant 
+              rotate_90 = 0;
+			  delta_time = TCNT0 + (timer0_var * 256);
+            end 
+
+	sensor_flag = 1;
+     end
+    else //if ((sensor_ready == 0) && (sensor_flag == 1))
+    begin
+         delta_time = TCNT0 + (timer0_var * 256);
+	 count = delta_time;
+	timer0_var = 0;
+	sensor_ready = 1;
+    end 
+end
+
+
+//Timer interrupt 2
+
+ISR (INT2_vect)
+begin
+  if (sensor_flag == 0)
+   begin
+        TCNT0 = 0;
+	timer0_var = 0;
+	rotate_90 = 1;
+	if ((EIFR & 0x03)==0x03)
+	  begin
+	      sensor_ready = 1;
+	      EIFR  = (1 <<INTF1)|(1<<INTF2);  //clear external interrupt flag
+	      right_dir = 1; //S0 equidistant from both S1 and S0
+              left_dir = 1;
+			  sensor_flag = 1;
+			  delta_time = 0;
+          end
+
+        else if ((EIFR & 0x03)==0x02)
+	  begin
+	      //sensor_ready = 1;
+	      EIFR  = (1 <<INTF1);  //clear external interrupt flag
+	      right_dir = 0; //S1 and S2 equidistant 
+              left_dir = 1;
+			  sensor_flag = 1;
+          end 
+
+	else if ((EIFR & 0x03)==0x01)
+	  begin
+	      //sensor_ready = 1;
+	      EIFR  = (1 <<INTF0);  //clear external interrupt flag
+	      right_dir = 1; //S0 and S1 equidistant 
+              left_dir = 0;
+			  sensor_flag = 1;
+          end 
+
+	//sensor_flag = 1;
+    end
+     else if ((sensor_ready == 0) && (sensor_flag == 1))
+      begin
+     //      delta_time = TCNT0 + (timer0_var * 256);
+	 //  count = timer0_var;
+	 //  timer0_var = 0;
+	 //  sensor_ready = 1;
+	     rotate_90 = 1;
+      end 
+	  else
+	  begin
+	  end
+end
+
+ISR (TIMER0_OVF_vect)
+begin
+    timer0_var++;
+end
+
+
+ISR (TIMER2_COMPA_vect)
+begin
+   timer2right_100us++;
+   timer2left_100us++;
+   timer_Led++;
+end
+
+
+ 
+ void init (void)
+ begin
+   EIMSK = (1<<INT0)| (1<<INT1) | (1<<INT2) ; // turn on int0 and int1 and int2
+   //INT0 is PD2
+   //INT1 is PD3
+   //INT2 is PB2
+   EICRA = 0x3F ;                  // rising edge
+   // turn on timer 2 to be read in int0 ISR
+   TCCR0B = 1 ; // divide by 1024
+   // turn on timer 2 overflow ISR for double precision time
+   TIMSK0 = 1 ;
+   // Timer 2 prescaler 32
+   TCCR2B = 3; 
+   // Output compare match A interrupt enabled
+   TIMSK2 = 2;
+   //Clear TCNT2 on compare match
+   TCCR2A = (1<<WGM21);
+   // Interrupt every 100us
+   OCR2A = 49;
+   // Port D0 AND d1 used to produce pwm
+   DDRA = 0x0F;
+   PORTA=0;
+
+   DDRC = 0xFF;
+   PORTC=0;
+   uart_init();
+   sei();
+ end
+ 
+ main ()
+ begin
+    init();
+
+	fprintf(&uart_str, "start\n");
+	while (1)
+	begin
+	if (timer_Led == 2000)
+	begin
+	    PORTC = 0xAA;
+    end
+	else if (timer_Led >= 4000)
+	begin
+	    PORTC = 0x55;
+		timer_Led = 0;
+    end
+    
+	if (sensor_ready == 1)
+	begin
+		  deltatime_us = count /16;
+		  //PORTC = 1;
+      
+		 if ( deltatime_us <= 670)
+		 begin 
+	        //Angle = asin(0.785) ;
+		   Angle = (double)(asinf((double)(deltatime_us * 343*0.0001)/(double)DISTANCE));
+		   Angle_deg = (double)(Angle*180.0)/3.14;
+	     end
+		 else
+		 begin
+		    if (( deltatime_us > 670) && ( deltatime_us < 2000))
+			begin
+			 Angle_deg = 90.00;
+			 Angle = 1.57;
+			end
+	
+	     end
+		 //Algorithm for angle
+		 if ((rotate_90 == 0) && (( right_dir == 1) || (left_dir == 1)) && (Angle_deg <=22.5))
+		 begin
+		    Motor_state = FWD;
+		
+		 end 
+		 if ((rotate_90 == 0) && ( right_dir == 1) && (left_dir == 0) && (Angle_deg > 22.5) && (Angle_deg <= 67.5) )
+		 begin
+		    Motor_state = R_45;
+	
+		    
+		 end
+		 if (((rotate_90 == 0)||(rotate_90 == 1)) && ( right_dir == 1) && (left_dir == 0) && (Angle_deg > 67.5) )
+		 begin
+		    Motor_state = R_90;
+		 end
+	     if ((rotate_90 == 1) && ( right_dir == 1) && (left_dir == 0) && (Angle_deg > 22.5) && (Angle_deg <= 67.5) )
+		 begin
+		    Motor_state = R_90_45;
+		 end
+		 if ((rotate_90 == 1) && (( right_dir == 1) || (left_dir == 1)) && (Angle_deg <=22.5))
+		 begin
+		    Motor_state = BCK;
+		 end
+		 if ((rotate_90 == 0) && ( right_dir == 0) && (left_dir == 1) && (Angle_deg > 22.5) && (Angle_deg <= 67.5) )
+		 begin
+		    Motor_state = L_45;
+		 end
+		 if (((rotate_90 == 0)||(rotate_90 == 1)) && ( right_dir == 0) && (left_dir == 1) && (Angle_deg > 67.5) )
+		 begin
+		    Motor_state = L_90;
+		 end
+	     if ((rotate_90 == 1) && ( right_dir == 0) && (left_dir == 1) && (Angle_deg > 22.5) && (Angle_deg <= 67.5) )
+		 begin
+		    Motor_state = L_90_45;
+		 end
+	     if (deltatime_us > 2000)
+		 begin	
+	         Motor_state = 0;
+	     end	 
+
+		 
+     fprintf(&uart_str, "%d,%d,%d,%ld,%f,%f,%d\n",right_dir,left_dir,rotate_90,deltatime_us,Angle,Angle_deg,Motor_state);
+     sensor_ready = 0;
+     sensor_flag = 0;
+     right_dir = 0;
+     left_dir  = 0;
+      rotate_90 = 0;
+    // 17 - counter, 13- clock
+	// R = 13,13 L= 17,17 , Fwd 17,13  
+
+	 switch ( Motor_state )
+	 begin
+	    case FWD : PORTA |= ((1<<PIN2)|(1<<PIN3));
+		           motor_movement ( 75, 13,17);
+				   PORTA &= ~((1<<PIN2)|(1<<PIN3));
+		           break;
+        case R_45 :{
+		               PORTA |= ((1<<PIN2)|(1<<PIN3));
+					   motor_movement (25, 13,13);
+					 // _delay_ms (100);
+		               motor_movement (75, 13,17);
+					   PORTA &= ~((1<<PIN2)|(1<<PIN3));
+					 // _delay_ms(100);
+					 // motor_movement (300,13,17);
+		           }
+		            break;
+        case R_90 :{
+		               PORTA |= ((1<<PIN2)|(1<<PIN3));
+					   motor_movement (70, 13,13);
+					 // _delay_ms (100);
+		               motor_movement (60, 13,17);
+					   PORTA &= ~((1<<PIN2)|(1<<PIN3));
+					 // _delay_ms(100);
+					 // motor_movement (300,13,17);
+		           }
+		            break;
+
+       case R_90_45 : {
+		               PORTA |= ((1<<PIN2)|(1<<PIN3));
+					   motor_movement (75, 13,13);
+					 // _delay_ms (100);
+		               motor_movement (75, 13,17);
+					   PORTA &= ~((1<<PIN2)|(1<<PIN3));
+					 // _delay_ms(100);
+					 // motor_movement (300,13,17);
+		           }
+		            break;
+
+		case BCK :{
+		           PORTA |= ((1<<PIN2)|(1<<PIN3));
+				   motor_movement (125, 13,13);
+				 // _delay_ms (100);
+		           motor_movement (75, 13,17);
+				   PORTA &= ~((1<<PIN2)|(1<<PIN3));
+				 // _delay_ms(100);
+				 // motor_movement (300,13,17);
+		      		 }
+        			break;
+        case L_45 :{
+		               PORTA |= ((1<<PIN2)|(1<<PIN3));
+					   motor_movement (25, 17,17);
+					 // _delay_ms (100);
+		               motor_movement (75, 13,17);
+					 // _delay_ms(100);
+					 // motor_movement (300,13,17);
+		           }
+		            break;
+        case L_90 :{
+		               PORTA |= ((1<<PIN2)|(1<<PIN3));
+					   motor_movement (60, 17,17);
+					 // _delay_ms (100);
+		               motor_movement (75, 13,17);
+					   PORTA &= ~((1<<PIN2)|(1<<PIN3));
+					 // _delay_ms(100);
+					 // motor_movement (300,13,17);
+		           }
+		            break;
+		case L_90_45 : {
+			           PORTA |= ((1<<PIN2)|(1<<PIN3));
+					   motor_movement (75, 17,17);
+					 // _delay_ms (100);
+			           motor_movement (75, 13,17);
+					   PORTA &= ~((1<<PIN2)|(1<<PIN3));
+					 // _delay_ms(100);
+					 // motor_movement (300,13,17);
+			       }
+		            break;
+        default: //motor_movement ( 300, 13,13);
+		break;
+	 
+	 end 
+
+  
+       end
+	     
+
+
+	end
+ end   
+
+ void motor_movement ( int reqPulse, char rightSpeed, char leftspeed )
+ begin
+     char lowtime_r = 0, lowtime_l = 0;
+     timer2right_100us = 0;
+	 timer2left_100us = 0;
+	 times_r = 0;
+	 times_l=0;
+
+
+     if ( rightSpeed == leftspeed)
+	 {
+	    lowtime_r = 200;
+		lowtime_l = 200;
+     }
+	 else if (  rightSpeed > leftspeed)
+     {
+	    
+        lowtime_r = 200;
+		lowtime_l = 204;
+
+      }
+	  else if (rightSpeed < leftspeed)
+	  {
+        lowtime_r = 204;
+		lowtime_l = 200;
+
+      }
+
+
+     while (((times_r < reqPulse) || (times_l < reqPulse)) && (sensor_ready == 0))
+      begin
+			
+          // A0 = right, A1 = left
+		// Sensor with mc is right
+          if (high_pulse_right == 1)
+          begin
+           if ( timer2right_100us > rightSpeed)
+           begin
+              PORTA &= ~ (1<<PINA0);
+              timer2right_100us = 0;
+              high_pulse_right = 0;
+           end
+          end
+          else
+          begin
+            if ( timer2right_100us > lowtime_r)
+           begin
+              PORTA |= (1<<PINA0);
+              timer2right_100us = 0;
+              high_pulse_right = 1;
+			  times_r++;
+           end
+		 end 
+		 // Left
+		  if (high_pulse_left == 1)
+          begin
+           if ( timer2left_100us > leftspeed)
+           begin
+              PORTA &= ~ (1<<PINA1);
+              timer2left_100us = 0;
+              high_pulse_left = 0;
+           end
+          end
+          else
+          begin
+            if ( timer2left_100us > lowtime_l)
+           begin
+              PORTA|= 2;
+              timer2left_100us = 0;
+              high_pulse_left = 1;
+			  times_l++;
+           end
+		 end
+		 
+  end	 
+		 
+end	     
+	//delta_time = 0;
+
+	//if(times>=100)
+	//begin
+	//times++;
+	//if(times>200)
+	//begin
+	//	times=0;
+	//end	
+	//end
