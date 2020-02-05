@@ -1,0 +1,6 @@
+Cone localization algorithm : 
+
+4 mics are arranged at the vertices of a square of side 2*a. The horizontal pairs and vertical pairs of mics are used to constitute 4 loci of cones.
+the x y co-ordinates of the intersection of the loci will give the same of the sound source. 
+
+the angle of the cones is obtained by delay between 2 mics of every pair. 
