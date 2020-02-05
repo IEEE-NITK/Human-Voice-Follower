@@ -4,3 +4,5 @@ Cone localization algorithm :
 the x y co-ordinates of the intersection of the loci will give the same of the sound source. 
 
 the angle of the cones is obtained by delay between 2 mics of every pair. 
+
+https://en.wikipedia.org/wiki/3D_sound_localization#Cross-power_spectrum_phase_(CSP)_analysis
